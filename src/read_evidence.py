@@ -69,7 +69,11 @@ class Tabular:
         # further parse this information (index=2)
         # Dictionary is slightly different for pLink, because this engine 
         # requires a different approach for parsing
-        self.engines = {"XlinkX": [["Sequence A", "Sequence B", 
+        self.engines = {"XlinkX_CSM": [["Sequence A", "Sequence B",
+                                        "XlinkX Score"],
+                                       self.parse_xlinkx_xi_seqs_scores,
+                                       self.parse_xlinkx_csm_pos_ids],
+                        "XlinkX": [["Sequence A", "Sequence B",
                                     "Max. XlinkX Score", "Is Decoy"], 
                                    self.parse_xlinkx_xi_seqs_scores, 
                                    self.parse_xlinkx_pos_ids],
@@ -82,15 +86,32 @@ class Tabular:
                                             "Score", "IsDecoy"],
                                            self.parse_xlinkx_xi_seqs_scores, 
                                            self.parse_xi_pos_ids]}
-        
+
+        # Column used by parse_engine() to identify each evidence file
+        # format. This is kept separate from self.engines[eng][0] (which
+        # lists the columns used to extract sequences/scores) because a
+        # standard XlinkX "Crosslinks" export and an XlinkX Crosslink
+        # Spectrum Match (CSM) export both contain a "Sequence A" column,
+        # so that column alone cannot tell the two formats apart.
+        # "Crosslinker Position A" is only present in CSM exports (the
+        # crosslink position is given in a separate column rather than as
+        # a bracket in the sequence, as is done for a "Crosslinks" export),
+        # so it is used to identify those files unambiguously. XlinkX_CSM
+        # is listed before XlinkX so CSM files are matched first.
+        self.id_columns = {"XlinkX_CSM": "Crosslinker Position A",
+                           "XlinkX": "Sequence A",
+                           "pLink": "Peptide",
+                           "Xi": "Peptide1",
+                           "Xi_alternative": "PepSeq1"}
+
         # Get header and delimiter
         extension = os.path.splitext(evidence_file)[1][1:]
         self.is_excel = (extension == "xls" or extension == "xlsx") 
         header, delimiter = self.parse_headers(evidence_file)
-        
+
         # Get engine with header
         engine = self.parse_engine(header)
-        
+
         if engine == "":
             print("Unsupported evidence file format")
             return
@@ -156,6 +177,35 @@ class Tabular:
             sort_peptides(peptide_pair)
             
             
+    def parse_xlinkx_csm_pos_ids(self, peptide_pairs, df, *args):
+
+        # Parse the crosslink positions and peptide pair references of
+        # XlinkX Crosslink Spectrum Match (CSM) evidence files. Unlike a
+        # standard XlinkX "Crosslinks" export, a CSM export does not encode
+        # the crosslinked residue as a bracket in the peptide sequence;
+        # instead, the crosslink position (1-based) is given in separate
+        # "Crosslinker Position A" and "Crosslinker Position B" columns.
+
+        pos_col_names = {"XLinkPositionA": "Crosslinker Position A",
+                         "XLinkPositionB": "Crosslinker Position B"}
+        positions = {pos_attr: df[col_name].tolist()
+                    for pos_attr, col_name in pos_col_names.items()}
+
+        for i, peptide_pair in enumerate(peptide_pairs):
+            peptide_pair.Ref = i + 2
+            for seq_attr, pos_attr in zip(double_attributes["Sequences"],
+                                          double_attributes["Positions"]):
+                if peptide_pair.invalid(seq_attr):
+                    pos = ""
+                else:
+                    # XlinkX CSM positions are 1-based, where 1 is the
+                    # first (N-terminal) residue. XMAS positions are
+                    # 0-based, with 0 as the N-terminal residue.
+                    pos = max(int(positions[pos_attr][i]) - 1, 0)
+                setattr(peptide_pair, pos_attr, pos)
+            sort_peptides(peptide_pair)
+
+
     def parse_plink(self, df):
         
         # Parse pLink evidence files
@@ -253,8 +303,7 @@ class Tabular:
     def parse_engine(self, header):
         
         engine = ""
-        for i, eng in enumerate(self.engines):
-            col_name = self.engines[eng][0][0]
+        for eng, col_name in self.id_columns.items():
             col_name_quote = "\"" + col_name + "\""
             if (col_name not in header and col_name_quote not in header):
                 continue
