@@ -19,10 +19,11 @@ from Qt.QtWidgets import QMessageBox
 # The name and content of the first (reference) column depends on the search
 # engine used. This dictionary contains the reference column names.
 ref_columns = {"XlinkX": "Row in evidence file",
+               "XlinkX_CSM": "Row in evidence file",
                "pLink": "Peptide_Order",
-              "Xi": "PeptidePairID",
-              "Xi_alternative": "PSMID",
-              "mzIdentML": "Peptide id"}
+               "Xi": "PeptidePairID",
+               "Xi_alternative": "PSMID",
+               "mzIdentML": "Peptide id"}
 
 
 # Each mapping information file is created and maintainted with an instance if 
