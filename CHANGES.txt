@@ -1,3 +1,8 @@
+17/11/2026
+- Added AlphaLink2 export of filtered mapped crosslinks with matching FASTA and residue mapping.
+- Export chain order is configurable; positions follow FASTA sequence indices and duplicate pairs are collapsed.
+- The user supplies a dataset FDR probability; search-engine scores are never converted to FDR.
+
 28/09/2023
 - Merged changes by Micha Birklbauer to fix crash with the visualize dialog
 - Visualize dialog is shown once. Repeat clicks of the button do not result in further instances.

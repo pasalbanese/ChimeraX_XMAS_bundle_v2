@@ -4,6 +4,8 @@
 
 [Detailed user manual](user_manual/XMAS_manual.md)
 
+[Export crosslinks to AlphaLink2](user_manual/AlphaLink2_export.md)
+
 Preprint: [Xlink Mapping and AnalySis (XMAS) - Smooth Integrative Modeling in ChimeraX](https://doi.org/10.1101/2022.04.21.489026 )
 
 &nbsp;
@@ -15,6 +17,7 @@ XMAS, a bundle that allows users to load results from several XL-MS search engin
 <img src="user_manual/figures/Fig_2.png" width="1000">
 
 &nbsp;
+
 
 
 

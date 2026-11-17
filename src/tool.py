@@ -1319,6 +1319,7 @@ class XMAS(ToolInstance):
             overlap_layout.addWidget(widget)
         
         export_button = QPushButton("Export subset")
+        alphalink_button = QPushButton("Export AlphaLink2…")
 
         self.checkbox_pb = QCheckBox(".pb")
         self.checkbox_pb.setChecked(True)
@@ -1343,11 +1344,15 @@ class XMAS(ToolInstance):
         layout.addWidget(QLabel(""), 10, 0)
         layout.addLayout(checkbox_layout, 11, 0)       
         layout.addWidget(export_button, 11, 1)
+        layout.addWidget(alphalink_button, 12, 1)
 
         self.subset_dialog.ui_area.setLayout(layout)
 
         export_button.clicked.connect(lambda: self.export_subset(pbs,
                                                                  checkboxes))
+
+        alphalink_button.clicked.connect(
+            lambda: self.export_subset(pbs, checkboxes, alphalink=True))
 
         self.subset_dialog.manage(None)
         self.subset_dialog.cleanup = lambda: self.display_all(pbs)
@@ -1407,7 +1412,7 @@ class XMAS(ToolInstance):
         return int(maximum) + 1
 
 
-    def export_subset(self, pseudobonds, checkboxes):
+    def export_subset(self, pseudobonds, checkboxes, alphalink=False):
         
         # Export a subset of pbs using the Export dialog
 
@@ -1506,6 +1511,10 @@ class XMAS(ToolInstance):
             print("No pseudobonds match the criteria")
             return
         
+        if alphalink:
+            self.show_alphalink_dialog(valid_pseudobonds)
+            return
+
         # Determine which files need to be created, and create them. Show 
         # DisVis dialog if DisVis restraints file needs to be created
         if checkboxes["Pb"].isChecked():
@@ -1525,6 +1534,85 @@ class XMAS(ToolInstance):
         elif (not checkboxes["Pb"].isChecked()
               and checkboxes["DisVis"].isChecked()):
             self.show_disvis_dialog(models, valid_pseudobonds)
+
+
+    def show_alphalink_dialog(self, pseudobonds):
+        from .alphalink_export import linked_chains, build_alphalink_export
+        from pathlib import Path
+        from Qt.QtWidgets import QMessageBox
+
+        try:
+            chains = linked_chains(pseudobonds)
+        except ValueError as error:
+            self.session.logger.warning(str(error))
+            return
+        dialog = self.create_child_window(self.tool_window, "Export AlphaLink2")
+        layout = QVBoxLayout()
+        layout.addWidget(QLabel(
+            "Drag chains into FASTA order (first = A, second = B, …).\n"
+            "Exports the filtered mapped links and matching model sequences.\n"
+            "Unresolved sequence positions are retained; PDB numbering is remapped."))
+        chain_list = QListWidget()
+        chain_list.setDragDropMode(QAbstractItemView.InternalMove)
+        # Keep chain objects separately: item text survives internal drag/drop.
+        chain_lookup = {}
+        for chain in chains:
+            text = "#%s/%s (%s residues)" % (
+                chain.structure.id_string, chain.chain_id, len(chain.characters))
+            chain_lookup[text] = chain
+            chain_list.addItem(text)
+        layout.addWidget(chain_list)
+        layout.addWidget(QLabel(
+            "FDR for every exported restraint (probability 0–1; e.g. 0.01 = 1%).\n"
+            "Enter the value justified by your filtered dataset. Scores are not converted."))
+        fdr_edit = QLineEdit()
+        fdr_edit.setPlaceholderText("e.g. 0.01")
+        layout.addWidget(fdr_edit)
+        save_button = QPushButton("Save AlphaLink2 CSV + FASTA + mapping")
+        layout.addWidget(save_button)
+        dialog.ui_area.setLayout(layout)
+
+        def save():
+            ordered_chains = [chain_lookup[chain_list.item(i).text()]
+                              for i in range(chain_list.count())]
+            try:
+                result = build_alphalink_export(pseudobonds, ordered_chains,
+                                               fdr_edit.text())
+            except ValueError as error:
+                self.session.logger.warning(str(error))
+                return
+            filename, _ = QFileDialog.getSaveFileName(
+                None, "Save AlphaLink2 input", "", "AlphaLink2 crosslinks (*.csv)")
+            if not filename:
+                return
+            csv_path = Path(filename)
+            if csv_path.suffix.lower() != ".csv":
+                csv_path = Path(str(csv_path) + ".csv")
+            outputs = [(csv_path, result.crosslinks),
+                       (csv_path.with_suffix(".fasta"), result.fasta),
+                       (csv_path.with_suffix(".chains.tsv"), result.mapping)]
+            companions = [str(path) for path, _ in outputs[1:] if path.exists()]
+            if companions:
+                answer = QMessageBox.question(
+                    None, "Replace companion files?",
+                    "These companion files already exist:\n" + "\n".join(companions),
+                    QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+                if answer != QMessageBox.Yes:
+                    return
+            try:
+                for path, content in outputs:
+                    path.write_text(content, encoding="utf-8")
+            except OSError as error:
+                self.session.logger.warning("AlphaLink2 export could not finish: %s" % error)
+                return
+            self.session.logger.info(
+                "Exported %s unique AlphaLink2 restraints to %s. Upload this CSV "
+                "and its matching .fasta to AlphaLink2; chain order and sequence "
+                "numbering must stay unchanged." % (result.count, csv_path))
+            dialog.destroy()
+
+        save_button.clicked.connect(save)
+        dialog.manage(None)
 
 
     def show_disvis_dialog(self, models, pseudobonds, pb_lines=None):
@@ -2584,3 +2672,4 @@ class VisualizePseudobonds(Pseudobonds):
 
         for i, group in enumerate(groups):
             group.dashes = value[i]
+
