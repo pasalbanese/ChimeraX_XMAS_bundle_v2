@@ -7,9 +7,9 @@ Open **Tools → Structure Analysis → XMAS**.
 1. Import and map your XL-MS data as usual. Select the crosslink models and
    open their **Export** dialog.
 2. Set the molecular-model, link-type, distance, score, and overlap filters.
-   **Export AlphaLink2…** uses those same filters. The `.pb` and DisVis
-   checkboxes apply only to the original **Export subset** button.
-3. Click **Export AlphaLink2…**. Drag the listed chains into the desired
+   Select **AlphaLink2** alongside the existing `.pb` and DisVis output choices.
+   Selecting AlphaLink2 deselects those formats (and vice versa).
+3. Click the existing **Export subset** button. Drag the listed chains into the desired
    FASTA order: first is A, second B, and so on. Distinct chains from different
    molecular models remain separate even when their original chain IDs match.
 4. Enter the FDR probability justified by your filtered dataset, for example

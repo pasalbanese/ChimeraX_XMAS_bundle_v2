@@ -6,6 +6,8 @@
 
 [Export crosslinks to AlphaLink2](user_manual/AlphaLink2_export.md)
 
+[Compare all possible K–K distances with mapped crosslinks](user_manual/Possible_distances.md)
+
 Preprint: [Xlink Mapping and AnalySis (XMAS) - Smooth Integrative Modeling in ChimeraX](https://doi.org/10.1101/2022.04.21.489026 )
 
 &nbsp;

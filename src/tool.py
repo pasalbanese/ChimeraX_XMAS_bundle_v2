@@ -42,7 +42,7 @@ from Qt.QtWidgets import (QVBoxLayout, QGridLayout, QHBoxLayout,
                           QTreeWidgetItemIterator, QFileDialog,
                           QTreeWidgetItem, QListWidget, QListWidgetItem,
                           QComboBox, QButtonGroup, QRadioButton, 
-                          QStyledItemDelegate)     
+                          QStyledItemDelegate, QMenu)     
 from qtrangeslider import QRangeSlider
 import re
 import seaborn as sns
@@ -318,9 +318,17 @@ class XMAS(ToolInstance):
             button = QPushButton()
             button.setText(key)
             buttons_layout.addWidget(button)
-            function = (lambda _, f=buttons_dict[key]:
-                        self.is_selection_empty(f))
-            button.clicked.connect(function)
+            if key == "Analyze":
+                menu = QMenu(button)
+                menu.addAction("Crosslink analysis…").triggered.connect(
+                    lambda _: self.is_selection_empty(self.show_analyze_dialog))
+                menu.addAction("All possible K–K distances…").triggered.connect(
+                    lambda _: self.show_possible_distances_dialog())
+                button.setMenu(menu)
+            else:
+                function = (lambda _, f=buttons_dict[key]:
+                            self.is_selection_empty(f))
+                button.clicked.connect(function)
 
         self.integrate_button = QPushButton("Integrate")
         buttons_layout.addWidget(self.integrate_button)
@@ -1032,6 +1040,148 @@ class XMAS(ToolInstance):
         self.analyze_dialog.manage(None)
         
 
+    def show_possible_distances_dialog(self):
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+        from Qt.QtWidgets import QApplication, QMessageBox, QProgressDialog
+        from .possible_distances import (calculate_distances, plot_distribution,
+                                         DistanceCalculationCancelled)
+
+        models = [m for m in self.session.models
+                  if isinstance(m, Structure) and not isinstance(m, PseudobondGroup)]
+        if not models:
+            self.session.logger.warning("Open a molecular model first.")
+            return
+        dialog = self.create_child_window(self.tool_window, "All possible K–K distances")
+        layout = QVBoxLayout()
+        layout.addWidget(QLabel("Molecular model (all resolved lysines in this model):"))
+        model_menu = QComboBox()
+        for model in models:
+            model_menu.addItem("#%s %s" % (model.id_string, model.name))
+        layout.addWidget(model_menu)
+        atom_menu = QComboBox()
+        atom_menu.addItems(["CA", "NZ"])
+        layout.addWidget(QLabel("Measure the same atom pair for possible and mapped links:"))
+        layout.addWidget(atom_menu)
+        scope_menu = QComboBox()
+        scope_menu.addItems(["All pairs", "Intrachain only", "Interchain only"])
+        layout.addWidget(scope_menu)
+        bin_edit = QLineEdit("2.0")
+        layout.addWidget(QLabel("Histogram bin width (Å):"))
+        layout.addWidget(bin_edit)
+        layout.addWidget(QLabel(
+            "Compare with checked crosslink models (optional):\n"
+            "Only unique K–K pairs within the chosen model and scope are counted."))
+        groups = QTreeWidget()
+        groups.setHeaderLabels(["Crosslink model"])
+        for i in range(self.pbonds_menu.topLevelItemCount()):
+            original = self.pbonds_menu.topLevelItem(i)
+            item = QTreeWidgetItem(groups)
+            item.setText(0, original.text(0))
+            item.setCheckState(0, original.checkState(0))
+            item.model = original.model
+        layout.addWidget(groups)
+        pb_box = QCheckBox("Also write all pairs as a .pb file (may be large)")
+        layout.addWidget(pb_box)
+        layout.addWidget(QLabel(
+            "Saves the pair TSV and comparison plot (PNG + SVG).\n"
+            "All distances are included; no distance cutoff. Missing atoms are skipped.\n"
+            "Choose a single coordinate model/conformer; separate models are not pooled."))
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        layout.addWidget(buttons)
+        buttons.rejected.connect(dialog.destroy)
+        dialog.ui_area.setLayout(layout)
+
+        def calculate():
+            model = models[model_menu.currentIndex()]
+            if model.deleted:
+                self.session.logger.warning("The molecular model was closed; reopen this dialog.")
+                return
+            try:
+                width = float(bin_edit.text())
+                if not np.isfinite(width) or width <= 0:
+                    raise ValueError()
+            except ValueError:
+                self.session.logger.warning("Histogram bin width must be positive and finite.")
+                return
+            pbs = []
+            for i in range(groups.topLevelItemCount()):
+                item = groups.topLevelItem(i)
+                if item.checkState(0) == Qt.Checked and not item.model.deleted:
+                    pbs.extend(item.model.pseudobonds)
+            filename, _ = QFileDialog.getSaveFileName(
+                None, "Save K–K distances and plot", "", "Distance table (*.tsv)")
+            if not filename:
+                return
+            target = Path(filename)
+            if target.suffix.lower() != ".tsv":
+                target = Path(str(target) + ".tsv")
+            suffixes = [".tsv", ".png", ".svg"] + ([".pb"] if pb_box.isChecked() else [])
+            destinations = [target.with_suffix(ext) for ext in suffixes]
+            existing = [str(path) for path in destinations if path.exists()]
+            if existing and QMessageBox.question(
+                    None, "Replace distance outputs?", "Replace these files?\n" + "\n".join(existing),
+                    QMessageBox.Yes | QMessageBox.No, QMessageBox.No) != QMessageBox.Yes:
+                return
+            progress = QProgressDialog("Calculating all K–K distances…", "Cancel", 0, 100,
+                                       dialog.ui_area)
+            progress.setWindowModality(Qt.WindowModal)
+            progress.setMinimumDuration(0)
+            progress.setAutoClose(False)
+            progress.show()
+            figure = None
+
+            def update(completed, total):
+                if completed % 20 == 0 or completed == total:
+                    progress.setValue(int(100 * completed / max(total, 1)))
+                    QApplication.processEvents()
+                return not progress.wasCanceled()
+
+            buttons.setEnabled(False)
+            try:
+                # Stage outputs: cancellation/errors leave existing output files intact.
+                with TemporaryDirectory(prefix="xmas_distances_", dir=target.parent) as folder:
+                    staged = [Path(folder) / dest.name for dest in destinations]
+                    with staged[0].open("w", encoding="utf-8", newline="") as table:
+                        from contextlib import nullcontext
+                        pb_context = (staged[-1].open("w", encoding="utf-8")
+                                      if pb_box.isChecked() else nullcontext(None))
+                        with pb_context as pb_file:
+                            result = calculate_distances(
+                                model, pbs, atom_menu.currentText(),
+                                ["all", "intra", "inter"][scope_menu.currentIndex()],
+                                width, tsv=table, pb_file=pb_file, progress=update)
+                    figure = plot_distribution(result, "#%s %s" % (model.id_string, model.name))
+                    figure.savefig(staged[1], dpi=200)
+                    figure.savefig(staged[2])
+                    if progress.wasCanceled():
+                        raise DistanceCalculationCancelled()
+                    for source, destination in zip(staged, destinations):
+                        source.replace(destination)
+                self.create_plot("All possible K–K distances")
+                plt.show()
+                self.session.logger.info(
+                    "K–K distances: %s possible pairs; %s unique mapped pairs; "
+                    "%s lysines lack %s atoms; %s mapped records excluded by "
+                    "model/residue/scope criteria. Saved %s and matching plots." % (
+                        result.possible_pairs, result.observed_pairs, result.missing_atoms,
+                        result.atom_name, result.ignored_observed, target))
+            except DistanceCalculationCancelled:
+                if figure is not None:
+                    plt.close(figure)
+                self.session.logger.info("K–K distance calculation cancelled; no outputs saved.")
+            except (ValueError, OSError) as error:
+                if figure is not None:
+                    plt.close(figure)
+                self.session.logger.warning("K–K distance calculation could not finish: %s" % error)
+            finally:
+                progress.close()
+                buttons.setEnabled(True)
+
+        buttons.accepted.connect(calculate)
+        dialog.manage(None)
+
+
     def create_child_window(self, parent, title):
         
         window = parent.create_child_window(title)
@@ -1319,12 +1469,20 @@ class XMAS(ToolInstance):
             overlap_layout.addWidget(widget)
         
         export_button = QPushButton("Export subset")
-        alphalink_button = QPushButton("Export AlphaLink2…")
 
         self.checkbox_pb = QCheckBox(".pb")
         self.checkbox_pb.setChecked(True)
         self.checkbox_disvis = QCheckBox("DisVis")
-        checkboxes = {"Pb":self.checkbox_pb, "DisVis":self.checkbox_disvis}
+        self.checkbox_alphalink = QCheckBox("AlphaLink2")
+        checkboxes = {"Pb": self.checkbox_pb, "DisVis": self.checkbox_disvis,
+                      "AlphaLink2": self.checkbox_alphalink}
+        # AlphaLink2 writes a matched CSV/FASTA set via the existing export action.
+        self.checkbox_alphalink.toggled.connect(
+            lambda checked: self.select_alphalink_format(checked, checkboxes))
+        for name in ("Pb", "DisVis"):
+            checkboxes[name].toggled.connect(
+                lambda checked: self.checkbox_alphalink.setChecked(False)
+                if checked else None)
         
         checkbox_layout = QHBoxLayout()
         for checkbox in checkboxes:
@@ -1344,15 +1502,11 @@ class XMAS(ToolInstance):
         layout.addWidget(QLabel(""), 10, 0)
         layout.addLayout(checkbox_layout, 11, 0)       
         layout.addWidget(export_button, 11, 1)
-        layout.addWidget(alphalink_button, 12, 1)
 
         self.subset_dialog.ui_area.setLayout(layout)
 
         export_button.clicked.connect(lambda: self.export_subset(pbs,
                                                                  checkboxes))
-
-        alphalink_button.clicked.connect(
-            lambda: self.export_subset(pbs, checkboxes, alphalink=True))
 
         self.subset_dialog.manage(None)
         self.subset_dialog.cleanup = lambda: self.display_all(pbs)
@@ -1412,7 +1566,13 @@ class XMAS(ToolInstance):
         return int(maximum) + 1
 
 
-    def export_subset(self, pseudobonds, checkboxes, alphalink=False):
+    def select_alphalink_format(self, checked, checkboxes):
+        if checked:
+            checkboxes["Pb"].setChecked(False)
+            checkboxes["DisVis"].setChecked(False)
+
+
+    def export_subset(self, pseudobonds, checkboxes):
         
         # Export a subset of pbs using the Export dialog
 
@@ -1511,7 +1671,7 @@ class XMAS(ToolInstance):
             print("No pseudobonds match the criteria")
             return
         
-        if alphalink:
+        if checkboxes["AlphaLink2"].isChecked():
             self.show_alphalink_dialog(valid_pseudobonds)
             return
 
@@ -2635,7 +2795,7 @@ class VisualizeSlider(Slider):
                 setattr(pb, attribute, value)
 
 
-class NoEditDelegate(QStyledItemDelegate):
+class NoEditDelegate(QStyledItemDelegate, QMenu):
     
     # Make an item not editable
     
