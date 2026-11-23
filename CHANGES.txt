@@ -1,3 +1,7 @@
+23/11/2026
+- Standardized the Python module name to chimerax.xmas (lowercase) to avoid a case-only package-name conflict with existing Windows installations. Tool name remains XMAS; bundle version is 1.1.5.
+- Documented changing into the source folder before building with ChimeraX 1.10, cleaning old build artifacts, restarting after installation, and checking the actual import path.
+
 18/11/2026
 - Added Analyze > All possible K–K distances: CA/NZ distributions compared with unique mapped crosslinks, TSV, PNG/SVG, and optional PB export (upstream issue #6).
 - AlphaLink2 is now an output format under Export, using the existing Export subset action; removed the separate feature button.
