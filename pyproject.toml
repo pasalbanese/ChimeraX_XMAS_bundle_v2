@@ -10,7 +10,7 @@ build-backend = "chimerax.bundle_builder.cx_pep517"
 # To override this name, see the [chimerax] section
 # below.
 name = "ChimeraX-XMAS"
-version = "1.1.4"
+version = "1.1.5"
 license = { text = "OSI Approved, Apache Software License" }
 authors= [{name = "R.A. Scheltema", email="r.a.scheltema@uu.nl"}]
 description = "Analyze and visualize crosslinking mass spectrometry data in a structural context"
@@ -49,7 +49,9 @@ Home = "https://scheltemalab.com/software/software-xmas/"
 # different installed name than the project name. For
 # example, ChimeraX-AlignmentHdrs uses this option to
 # name its package "alignment_headers"
-module-name-override = "XMAS"
+# Keep Python package casing consistent with existing chimerax.xmas installations.
+# The displayed tool name remains XMAS.
+module-name-override = "xmas"
 min-session-version = 1
 max-session-version = 1
 categories = ["Structure Analysis", "Crosslinking Mass Spectrometry", "Input/Output"]

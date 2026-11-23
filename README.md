@@ -1,6 +1,8 @@
 # XL Mapping and AnalySis (XMAS) with [UCSF ChimeraX](https://www.cgl.ucsf.edu/chimerax/)
 
-[Installation instructions](user_manual/XMAS_manual.md#5-setting-up)
+[Installation and Windows troubleshooting](user_manual/Installation.md)
+
+[Original installation instructions](user_manual/XMAS_manual.md#5-setting-up)
 
 [Detailed user manual](user_manual/XMAS_manual.md)
 
